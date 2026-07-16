@@ -1,4 +1,4 @@
-// KiloStash 2.0 — Frontend
+// KiloStash 3.0 — Frontend with custom dialog system
 let currentFolder = '/';
 let currentView = 'grid';
 let allItems = [];
@@ -28,12 +28,18 @@ function formatDate(iso) {
   return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-function toast(msg) {
-  const t = $('toast');
-  t.textContent = msg;
-  t.classList.remove('hidden');
-  clearTimeout(t._timer);
-  t._timer = setTimeout(() => t.classList.add('hidden'), 2500);
+function debounce(fn, ms) {
+  let timer;
+  return function(...args) {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(this, args), ms);
+  };
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
 }
 
 function fileIcon(type) {
@@ -51,10 +57,178 @@ function fileIcon(type) {
   return i[type] || i.file;
 }
 
-function escapeHtml(s) {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
+// ===== CUSTOM DIALOG SYSTEM =====
+let dialogCallback = null;
+let dialogCancelCallback = null;
+let previousFocusEl = null;
+
+function showDialog({ title, message, placeholder, input, value, confirmText, cancelText, danger, onConfirm, onCancel }) {
+  return new Promise(resolve => {
+    previousFocusEl = document.activeElement;
+    const overlay = $('dialogOverlay');
+    const card = $('dialogCard');
+    const titleEl = $('dialogTitle');
+    const msgEl = $('dialogMessage');
+    const inputEl = $('dialogInput');
+    const cancelBtn = $('dialogCancel');
+    const confirmBtn = $('dialogConfirm');
+
+    overlay.classList.remove('hidden', 'hiding');
+    titleEl.textContent = title || '';
+
+    if (message) {
+      msgEl.textContent = message;
+      msgEl.classList.remove('hidden');
+    } else {
+      msgEl.classList.add('hidden');
+    }
+
+    if (input) {
+      inputEl.classList.remove('hidden');
+      inputEl.placeholder = placeholder || '';
+      inputEl.value = value || '';
+      inputEl.type = 'text';
+    } else {
+      inputEl.classList.add('hidden');
+    }
+
+    cancelBtn.textContent = cancelText || 'Batal';
+    confirmBtn.textContent = confirmText || 'OK';
+    confirmBtn.className = 'dialog-btn dialog-btn-confirm' + (danger ? ' danger' : '');
+
+    // Remove old listeners
+    const newCancel = cancelBtn.cloneNode(true);
+    const newConfirm = confirmBtn.cloneNode(true);
+    cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
+    confirmBtn.parentNode.replaceChild(newConfirm, confirmBtn);
+
+    function close(result) {
+      overlay.classList.add('hiding');
+      setTimeout(() => {
+        overlay.classList.add('hidden');
+        overlay.classList.remove('hiding');
+        if (previousFocusEl) previousFocusEl.focus();
+        resolve(result);
+      }, 150);
+    }
+
+    newCancel.addEventListener('click', () => {
+      close(null);
+      if (onCancel) onCancel();
+    });
+
+    newConfirm.addEventListener('click', () => {
+      if (input) {
+        const val = inputEl.value.trim();
+        if (!val) { inputEl.focus(); return; }
+        close(val);
+        if (onConfirm) onConfirm(val);
+      } else {
+        close(true);
+        if (onConfirm) onConfirm();
+      }
+    });
+
+    // Focus trap
+    overlay.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close(null);
+        if (onCancel) onCancel();
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        newConfirm.click();
+      }
+    });
+
+    // Backdrop click
+    overlay.querySelector('.dialog-backdrop').addEventListener('click', () => {
+      close(null);
+      if (onCancel) onCancel();
+    }, { once: true });
+
+    // Focus input or confirm button
+    setTimeout(() => {
+      if (input) inputEl.focus();
+      else newConfirm.focus();
+    }, 50);
+  });
+}
+
+function showPrompt(title, placeholder, defaultValue) {
+  return showDialog({ title, input: true, placeholder, value: defaultValue });
+}
+
+function showConfirm(title, message, danger) {
+  return showDialog({ title, message, danger: !!danger, confirmText: danger ? 'Hapus' : 'OK' });
+}
+
+function showAlert(title, message) {
+  return showDialog({ title, message, cancelText: null });
+}
+
+// Override: showAlert hides cancel button
+const _origShowAlert = showAlert;
+showAlert = function(title, message) {
+  return new Promise(resolve => {
+    previousFocusEl = document.activeElement;
+    const overlay = $('dialogOverlay');
+    const card = $('dialogCard');
+    const titleEl = $('dialogTitle');
+    const msgEl = $('dialogMessage');
+    const inputEl = $('dialogInput');
+    const cancelBtn = $('dialogCancel');
+    const confirmBtn = $('dialogConfirm');
+
+    overlay.classList.remove('hidden', 'hiding');
+    titleEl.textContent = title || '';
+    msgEl.textContent = message || '';
+    msgEl.classList.remove('hidden');
+    inputEl.classList.add('hidden');
+
+    cancelBtn.style.display = 'none';
+    confirmBtn.textContent = 'OK';
+    confirmBtn.className = 'dialog-btn dialog-btn-confirm';
+
+    const newConfirm = confirmBtn.cloneNode(true);
+    confirmBtn.parentNode.replaceChild(newConfirm, confirmBtn);
+
+    function close() {
+      overlay.classList.add('hiding');
+      setTimeout(() => {
+        overlay.classList.add('hidden');
+        overlay.classList.remove('hiding');
+        cancelBtn.style.display = '';
+        if (previousFocusEl) previousFocusEl.focus();
+        resolve(true);
+      }, 150);
+    }
+
+    newConfirm.addEventListener('click', close);
+    overlay.addEventListener('keydown', e => {
+      if (e.key === 'Escape' || e.key === 'Enter') { e.preventDefault(); close(); }
+    });
+    overlay.querySelector('.dialog-backdrop').addEventListener('click', close, { once: true });
+    setTimeout(() => newConfirm.focus(), 50);
+  });
+};
+
+// ===== TOAST =====
+function toast(msg) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.remove('hidden', 'hide');
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => {
+    t.classList.remove('show');
+    t.classList.add('hide');
+    setTimeout(() => {
+      t.classList.add('hidden');
+      t.classList.remove('hide');
+    }, 250);
+  }, 2500);
 }
 
 // ===== AUTH =====
@@ -64,6 +238,7 @@ async function checkAuth() {
     if (res.ok) {
       const data = await res.json();
       if (data.authed) {
+        window._maxFileSize = data.maxFileSize || 0;
         $('siteName').textContent = data.siteName || 'KiloStash';
         showApp();
         return;
@@ -105,6 +280,7 @@ async function login() {
   } catch (e) {
     $('loginError').textContent = e.message;
     $('passwordInput').value = '';
+    $('passwordInput').focus();
   }
   $('loginBtn').disabled = false;
 }
@@ -122,13 +298,37 @@ $('logoutBtn').addEventListener('click', logout);
 
 // ===== FILES =====
 async function loadFiles() {
+  const loadingEl = $('loadingState');
+  const emptyEl = $('emptyState');
+  const errorEl = $('errorState');
+  const grid = $('fileGrid');
+  const list = $('fileList');
+
+  // Show loading on first load
+  if (allItems.length === 0) {
+    loadingEl.classList.remove('hidden');
+    emptyEl.classList.add('hidden');
+    errorEl.classList.add('hidden');
+    grid.classList.add('hidden');
+    list.classList.add('hidden');
+  }
+
   try {
     const res = await fetch(`/api/files?folder=${encodeURIComponent(currentFolder)}`);
-    if (!res.ok) return;
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     allItems = [...(data.folders || []), ...(data.files || [])];
+    errorEl.classList.add('hidden');
+    loadingEl.classList.add('hidden');
     renderItems();
-  } catch (e) { console.error(e); }
+  } catch (e) {
+    console.error(e);
+    loadingEl.classList.add('hidden');
+    emptyEl.classList.add('hidden');
+    grid.classList.add('hidden');
+    list.classList.add('hidden');
+    errorEl.classList.remove('hidden');
+  }
 }
 
 async function loadStats() {
@@ -136,9 +336,17 @@ async function loadStats() {
     const res = await fetch('/api/files/stats');
     if (!res.ok) return;
     const data = await res.json();
-    const pct = (data.totalSize / (10 * 1024 * 1024 * 1024)) * 100;
+    const totalGB = 10;
+    const usedGB = data.totalSize / (1024 * 1024 * 1024);
+    const pct = (usedGB / totalGB) * 100;
     $('storageBarFill').style.width = Math.min(pct, 100) + '%';
-    $('storageText').textContent = `${formatSize(data.totalSize)} / 10 GB`;
+    $('storageText').textContent = `${formatSize(data.totalSize)} / ${totalGB} GB`;
+
+    // Color change based on usage
+    const fill = $('storageBarFill');
+    if (pct > 90) fill.style.background = 'linear-gradient(90deg, var(--danger), var(--danger-hover))';
+    else if (pct > 75) fill.style.background = 'linear-gradient(90deg, var(--warning), #ffb340)';
+    else fill.style.background = '';
   } catch {}
 }
 
@@ -183,11 +391,15 @@ function renderItems() {
   grid.innerHTML = '';
   list.innerHTML = '';
 
-  items.forEach(item => {
+  items.forEach((item, idx) => {
     if (currentView === 'grid') {
-      grid.appendChild(makeGridCard(item));
+      const card = makeGridCard(item);
+      card.style.animationDelay = Math.min(idx * 0.03, 0.3) + 's';
+      grid.appendChild(card);
     } else {
-      list.appendChild(makeListRow(item));
+      const row = makeListRow(item);
+      row.style.animationDelay = Math.min(idx * 0.02, 0.3) + 's';
+      list.appendChild(row);
     }
   });
 
@@ -218,8 +430,8 @@ function makeGridCard(item) {
     <div class="file-thumb">${thumb}</div>
     <input type="checkbox" class="file-select-checkbox" ${selectedItems.has(item.key) ? 'checked' : ''}>
     ${!isFolder ? `<div class="file-actions">
-      <button class="file-action-btn" data-act="download"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
-      <button class="file-action-btn danger" data-act="delete"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+      <button class="file-action-btn" data-act="download"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
+      <button class="file-action-btn danger" data-act="delete"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
     </div>` : ''}
     <div class="file-card-info">
       <div class="file-card-name">${escapeHtml(item.name)}</div>
@@ -261,8 +473,9 @@ function makeGridCard(item) {
   let pressTimer;
   card.addEventListener('touchstart', e => {
     pressTimer = setTimeout(() => showContextMenu(e, item), 500);
-  });
+  }, { passive: true });
   card.addEventListener('touchend', () => clearTimeout(pressTimer));
+  card.addEventListener('touchmove', () => clearTimeout(pressTimer));
 
   // Right click
   card.addEventListener('contextmenu', e => {
@@ -320,8 +533,9 @@ function makeListRow(item) {
   let pressTimer;
   row.addEventListener('touchstart', e => {
     pressTimer = setTimeout(() => showContextMenu(e, item), 500);
-  });
+  }, { passive: true });
   row.addEventListener('touchend', () => clearTimeout(pressTimer));
+  row.addEventListener('touchmove', () => clearTimeout(pressTimer));
 
   row.addEventListener('contextmenu', e => {
     e.preventDefault();
@@ -363,6 +577,11 @@ function updateBreadcrumb() {
   });
 
   $('backBtn').classList.toggle('hidden', currentFolder === '/');
+
+  // Scroll breadcrumb to end on mobile
+  requestAnimationFrame(() => {
+    inner.scrollLeft = inner.scrollWidth;
+  });
 }
 
 $('backBtn').addEventListener('click', () => {
@@ -380,12 +599,19 @@ const fileInput = $('fileInput');
 
 dropZone.addEventListener('click', e => {
   if (e.target.id === 'newFolderBtn' || e.target.closest('#newFolderBtn')) return;
+  if (e.target.id === 'uploadUrlBtn' || e.target.closest('#uploadUrlBtn')) return;
   fileInput.click();
 });
 
 dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragover'); handleFiles(e.dataTransfer.files); });
+dropZone.addEventListener('dragleave', e => {
+  if (!dropZone.contains(e.relatedTarget)) dropZone.classList.remove('dragover');
+});
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  handleFiles(e.dataTransfer.files);
+});
 fileInput.addEventListener('change', e => { handleFiles(e.target.files); fileInput.value = ''; });
 
 async function handleFiles(files) {
@@ -394,16 +620,18 @@ async function handleFiles(files) {
   progress.classList.remove('hidden');
   progress.innerHTML = '';
 
-  // Upload all files in one request
   const formData = new FormData();
   formData.append('folder', currentFolder);
   for (const f of files) formData.append('file', f);
 
-  // Create progress items
   const items = [...files].map(f => {
     const div = document.createElement('div');
     div.className = 'upload-item';
-    div.innerHTML = `<span class="upload-item-name">${escapeHtml(f.name)}</span><div class="upload-item-bar"><div class="upload-item-fill" style="width:0%"></div></div><span class="upload-item-status">0%</span>`;
+    div.innerHTML = `
+      <span class="upload-item-name">${escapeHtml(f.name)}</span>
+      <div class="upload-item-bar"><div class="upload-item-fill" style="width:0%"></div></div>
+      <span class="upload-item-status">0%</span>
+    `;
     progress.appendChild(div);
     return div;
   });
@@ -445,15 +673,25 @@ async function handleFiles(files) {
 }
 
 // ===== NEW FOLDER =====
-$('newFolderBtn').addEventListener('click', e => {
+$('newFolderBtn').addEventListener('click', async e => {
   e.stopPropagation();
-  const name = prompt('Nama folder:');
+  const name = await showPrompt('Folder Baru', 'Nama folder');
   if (!name) return;
-  fetch('/api/files/folder', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: currentFolder === '/' ? name : currentFolder + '/' + name }),
-  }).then(() => { loadFiles(); toast('Folder dibuat'); });
+  try {
+    const res = await fetch('/api/files/folder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: currentFolder === '/' ? name : currentFolder + '/' + name }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Gagal membuat folder');
+    }
+    await loadFiles();
+    toast('Folder dibuat');
+  } catch (e) {
+    toast('Error: ' + e.message);
+  }
 });
 
 // ===== PREVIEW =====
@@ -461,7 +699,7 @@ function previewFile(item) {
   const modal = $('previewModal');
   $('previewName').textContent = item.name;
   $('previewDownload').onclick = () => downloadFile(item);
-  $('previewShare').onclick = () => { closeAllModals(); openShareModal(item); };
+  $('previewShare').onclick = () => { closeAllModals(); setTimeout(() => openShareModal(item), 200); };
   const body = $('previewBody');
   body.innerHTML = '<div class="loading-center"><div class="loading-spinner"></div></div>';
   modal.classList.remove('hidden');
@@ -483,44 +721,63 @@ function previewFile(item) {
 
 // ===== DOWNLOAD =====
 async function downloadFile(item) {
-  const res = await fetch(`/api/files/download/${encodeURIComponent(item.key)}`);
-  if (!res.ok) return;
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = item.name;
-  a.click();
-  URL.revokeObjectURL(url);
+  try {
+    const res = await fetch(`/api/files/download/${encodeURIComponent(item.key)}`);
+    if (!res.ok) throw new Error('Download gagal');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = item.name;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('Download dimulai');
+  } catch (e) {
+    toast('Error: ' + e.message);
+  }
 }
 
 // ===== DELETE =====
 async function deleteFiles(keys) {
-  if (!confirm(`Hapus ${keys.length} file?`)) return;
-  await fetch('/api/files/delete', {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ keys }),
-  });
-  keys.forEach(k => selectedItems.delete(k));
-  await loadFiles();
-  await loadStats();
-  toast('File dihapus');
+  const confirmed = await showConfirm(
+    `Hapus ${keys.length} file?`,
+    'File akan dipindahkan ke sampah.',
+    true
+  );
+  if (!confirmed) return;
+
+  try {
+    await fetch('/api/files/delete', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keys }),
+    });
+    keys.forEach(k => selectedItems.delete(k));
+    await loadFiles();
+    await loadStats();
+    toast('File dihapus');
+  } catch (e) {
+    toast('Error: Gagal menghapus file');
+  }
 }
 
 // ===== RENAME =====
 async function renameFile(item) {
-  const newName = prompt('Nama baru:', item.name);
+  const newName = await showPrompt('Rename', 'Nama baru', item.name);
   if (!newName || newName === item.name) return;
-  const res = await fetch('/api/files/rename', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ oldKey: item.key, newName }),
-  });
-  const data = await res.json();
-  if (data.error) { toast(data.error); return; }
-  await loadFiles();
-  toast('File diubah');
+  try {
+    const res = await fetch('/api/files/rename', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ oldKey: item.key, newName }),
+    });
+    const data = await res.json();
+    if (data.error) { toast(data.error); return; }
+    await loadFiles();
+    toast('File diubah');
+  } catch (e) {
+    toast('Error: Gagal mengubah nama');
+  }
 }
 
 // ===== SHARE =====
@@ -530,31 +787,45 @@ function openShareModal(item) {
   shareItem = item;
   $('shareResult').classList.add('hidden');
   $('shareModal').classList.remove('hidden');
+  $('createShareBtn').disabled = false;
 }
 
 $('createShareBtn').addEventListener('click', async () => {
   if (!shareItem) return;
-  const type = qs('input[name="shareType"]:checked').value;
-  const expires = $('shareExpires').value;
-  const res = await fetch('/api/files/share', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      key: shareItem.key,
-      expiresHours: parseInt(expires),
-      download: type === 'download',
-    }),
-  });
-  const data = await res.json();
-  if (data.url) {
-    const fullUrl = location.origin + data.url;
-    $('shareUrl').value = fullUrl;
-    $('shareResult').classList.remove('hidden');
-    $('copyShareBtn').onclick = () => {
-      $('shareUrl').select();
-      navigator.clipboard.writeText(fullUrl).then(() => toast('Link disalin'));
-    };
+  const btn = $('createShareBtn');
+  btn.disabled = true;
+  btn.textContent = 'Membuat...';
+
+  try {
+    const type = qs('input[name="shareType"]:checked').value;
+    const expires = $('shareExpires').value;
+    const res = await fetch('/api/files/share', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: shareItem.key,
+        expiresHours: parseInt(expires),
+        download: type === 'download',
+      }),
+    });
+    const data = await res.json();
+    if (data.url) {
+      const fullUrl = location.origin + data.url;
+      $('shareUrl').value = fullUrl;
+      $('shareResult').classList.remove('hidden');
+      $('copyShareBtn').onclick = () => {
+        navigator.clipboard.writeText(fullUrl).then(() => {
+          toast('Link disalin');
+          $('copyShareBtn').style.color = 'var(--success)';
+          setTimeout(() => $('copyShareBtn').style.color = '', 1500);
+        });
+      };
+    }
+  } catch (e) {
+    toast('Error: Gagal membuat share link');
   }
+  btn.disabled = false;
+  btn.textContent = 'Buat Link';
 });
 
 // ===== SETTINGS =====
@@ -567,48 +838,68 @@ $('changePwBtn').addEventListener('click', async () => {
   const cur = $('currentPw').value;
   const next = $('newPw').value;
   const conf = $('confirmPw').value;
-  if (next !== conf) { $('pwMsg').textContent = 'Konfirmasi password tidak cocok'; return; }
-  if (next.length < 4) { $('pwMsg').textContent = 'Password min 4 karakter'; return; }
+  if (next !== conf) { $('pwMsg').textContent = 'Konfirmasi password tidak cocok'; $('pwMsg').style.color = 'var(--danger)'; return; }
+  if (next.length < 4) { $('pwMsg').textContent = 'Password min 4 karakter'; $('pwMsg').style.color = 'var(--danger)'; return; }
 
-  const res = await fetch('/api/auth/change-password', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ currentPassword: cur, newPassword: next }),
-  });
-  const data = await res.json();
-  if (data.error) {
-    $('pwMsg').textContent = data.error;
+  const btn = $('changePwBtn');
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/auth/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword: cur, newPassword: next }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      $('pwMsg').textContent = data.error;
+      $('pwMsg').style.color = 'var(--danger)';
+    } else {
+      $('pwMsg').textContent = 'Password berhasil diganti';
+      $('pwMsg').style.color = 'var(--success)';
+      $('currentPw').value = '';
+      $('newPw').value = '';
+      $('confirmPw').value = '';
+      setTimeout(() => { $('pwMsg').textContent = ''; }, 3000);
+    }
+  } catch (e) {
+    $('pwMsg').textContent = 'Error: ' + e.message;
     $('pwMsg').style.color = 'var(--danger)';
-  } else {
-    $('pwMsg').textContent = 'Password berhasil diganti';
-    $('pwMsg').style.color = 'var(--success)';
-    $('currentPw').value = '';
-    $('newPw').value = '';
-    $('confirmPw').value = '';
-    setTimeout(() => { $('pwMsg').textContent = ''; }, 3000);
   }
+  btn.disabled = false;
 });
 
 async function loadShareLinks() {
-  const res = await fetch('/api/files/share/list');
-  const data = await res.json();
   const list = $('shareLinksList');
-  list.innerHTML = '';
-  if (!data.shares || data.shares.length === 0) {
-    list.innerHTML = '<p style="color:var(--text-3);font-size:13px">Belum ada share link</p>';
-    return;
-  }
-  for (const s of data.shares) {
-    const div = document.createElement('div');
-    div.className = 'share-link-item';
-    const name = s.key.split('/').pop();
-    div.innerHTML = `<span class="share-link-item-name">${escapeHtml(name)}</span><span style="color:var(--text-3)">${s.count}x</span><button class="share-link-item-btn" data-token="${s.token}">Hapus</button>`;
-    div.querySelector('button').addEventListener('click', async () => {
-      await fetch(`/api/files/share/${s.token}`, { method: 'DELETE' });
-      loadShareLinks();
-      toast('Share link dihapus');
-    });
-    list.appendChild(div);
+  list.innerHTML = '<div class="loading-center"><div class="loading-spinner"></div></div>';
+
+  try {
+    const res = await fetch('/api/files/share/list');
+    const data = await res.json();
+    list.innerHTML = '';
+
+    if (!data.shares || data.shares.length === 0) {
+      list.innerHTML = '<p style="color:var(--text-3);font-size:13px;text-align:center;padding:12px">Belum ada share link</p>';
+      return;
+    }
+    for (const s of data.shares) {
+      const div = document.createElement('div');
+      div.className = 'share-link-item';
+      const name = s.key.split('/').pop();
+      div.innerHTML = `
+        <span class="share-link-item-name">${escapeHtml(name)}</span>
+        <span class="share-link-item-count">${s.count}x</span>
+        <button class="share-link-item-btn" data-token="${s.token}">Hapus</button>
+      `;
+      div.querySelector('button').addEventListener('click', async () => {
+        await fetch(`/api/files/share/${s.token}`, { method: 'DELETE' });
+        loadShareLinks();
+        toast('Share link dihapus');
+      });
+      list.appendChild(div);
+    }
+  } catch (e) {
+    list.innerHTML = '<p style="color:var(--danger);font-size:13px;text-align:center;padding:12px">Gagal memuat share links</p>';
   }
 }
 
@@ -618,9 +909,13 @@ $('searchBtn').addEventListener('click', () => {
   if (!$('searchBar').classList.contains('hidden')) $('searchInput').focus();
 });
 
-$('searchInput').addEventListener('input', e => {
-  searchQuery = e.target.value.toLowerCase();
+const debouncedSearch = debounce(value => {
+  searchQuery = value.toLowerCase();
   renderItems();
+}, 200);
+
+$('searchInput').addEventListener('input', e => {
+  debouncedSearch(e.target.value);
 });
 
 $('searchClose').addEventListener('click', () => {
@@ -667,7 +962,6 @@ $('bulkDelete').addEventListener('click', () => {
 });
 
 $('bulkDownload').addEventListener('click', () => {
-  // Download each selected file
   for (const key of selectedItems) {
     const item = allItems.find(i => i.key === key);
     if (item) downloadFile(item);
@@ -684,8 +978,26 @@ function showContextMenu(e, item) {
   const x = e.touches ? e.touches[0].clientX : e.clientX;
   const y = e.touches ? e.touches[0].clientY : e.clientY;
 
-  menu.style.left = Math.min(x, window.innerWidth - 170) + 'px';
-  menu.style.top = Math.min(y, window.innerHeight - 220) + 'px';
+  const menuW = 200;
+  const menuH = 280;
+  const pad = 8;
+
+  let left = x;
+  let top = y;
+
+  if (left + menuW > window.innerWidth - pad) left = window.innerWidth - menuW - pad;
+  if (top + menuH > window.innerHeight - pad) top = window.innerHeight - menuH - pad;
+  if (left < pad) left = pad;
+  if (top < pad) top = pad;
+
+  menu.style.left = left + 'px';
+  menu.style.top = top + 'px';
+
+  // Hide preview for folders
+  const previewBtn = menu.querySelector('[data-action="preview"]');
+  if (previewBtn) {
+    previewBtn.style.display = item.type === 'folder' ? 'none' : '';
+  }
 }
 
 $('contextMenu').querySelectorAll('.ctx-item').forEach(btn => {
@@ -707,19 +1019,33 @@ document.addEventListener('click', e => {
   if (!e.target.closest('#contextMenu')) $('contextMenu').classList.add('hidden');
 });
 
+// Close context menu on scroll
+document.addEventListener('scroll', () => {
+  $('contextMenu').classList.add('hidden');
+}, { passive: true });
+
 // ===== MODAL CLOSE =====
 document.querySelectorAll('[data-close]').forEach(el => {
   el.addEventListener('click', closeAllModals);
 });
 
 function closeAllModals() {
-  qsa('.modal').forEach(m => m.classList.add('hidden'));
+  qsa('.modal').forEach(m => {
+    m.style.opacity = '0';
+    setTimeout(() => {
+      m.classList.add('hidden');
+      m.style.opacity = '';
+    }, 150);
+  });
   $('previewBody').innerHTML = '';
 }
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeAllModals();
-  // Keyboard shortcuts
+  if (e.key === 'Escape') {
+    // Don't close if dialog is open
+    if (!$('dialogOverlay').classList.contains('hidden')) return;
+    closeAllModals();
+  }
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   if (e.key === '/') { e.preventDefault(); $('searchBtn').click(); }
   if (e.key === 'Delete' && selectedItems.size > 0) { $('bulkDelete').click(); }
@@ -743,6 +1069,7 @@ $('trashBtn').addEventListener('click', () => {
     $('fileGrid').classList.add('hidden');
     $('fileList').classList.add('hidden');
     $('emptyState').classList.add('hidden');
+    $('errorState').classList.add('hidden');
     $('breadcrumb').classList.add('hidden');
     $('trashView').classList.remove('hidden');
     loadTrash();
@@ -756,18 +1083,20 @@ function exitTrashView() {
   $('toolbar').classList.remove('hidden');
   $('breadcrumb').classList.remove('hidden');
   $('trashView').classList.add('hidden');
+  trashView = false;
   loadFiles();
 }
 
 async function loadTrash() {
+  const list = $('trashList');
+  const empty = $('trashEmptyState');
+
   try {
     const res = await fetch('/api/files/trash');
-    if (!res.ok) return;
+    if (!res.ok) throw new Error('Failed to load trash');
     const data = await res.json();
     const items = data.items || [];
     $('trashCount').textContent = items.length + ' item di sampah';
-    const list = $('trashList');
-    const empty = $('trashEmptyState');
     list.innerHTML = '';
 
     if (items.length === 0) {
@@ -788,75 +1117,101 @@ async function loadTrash() {
           <div class="file-row-name">${escapeHtml(item.name)}</div>
           <div class="file-row-meta">${meta}</div>
         </div>
-        <div class="file-row-actions">
+        <div class="file-row-actions" style="opacity:1">
           <button class="btn-icon" data-act="restore" title="Kembalikan"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>
           <button class="btn-icon" data-act="delete" title="Hapus permanen" style="color:var(--danger)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></button>
         </div>
       `;
       row.querySelector('[data-act="restore"]').addEventListener('click', async (e) => {
         e.stopPropagation();
-        await fetch('/api/files/restore', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key: item.key }),
-        });
-        toast('File dikembalikan');
-        loadTrash();
-        loadStats();
+        try {
+          await fetch('/api/files/restore', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: item.key }),
+          });
+          toast('File dikembalikan');
+          loadTrash();
+          loadStats();
+        } catch (err) {
+          toast('Error: Gagal mengembalikan file');
+        }
       });
       row.querySelector('[data-act="delete"]').addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (!confirm('Hapus permanen? Tidak bisa dibatalkan.')) return;
-        await fetch(`/api/files/trash/${encodeURIComponent(item.key)}`, { method: 'DELETE' });
-        toast('File dihapus permanen');
-        loadTrash();
-        loadStats();
+        const confirmed = await showConfirm(
+          'Hapus permanen?',
+          `"${item.name}" akan dihapus selamanya. Tindakan ini tidak bisa dibatalkan.`,
+          true
+        );
+        if (!confirmed) return;
+        try {
+          await fetch(`/api/files/trash/${encodeURIComponent(item.key)}`, { method: 'DELETE' });
+          toast('File dihapus permanen');
+          loadTrash();
+          loadStats();
+        } catch (err) {
+          toast('Error: Gagal menghapus');
+        }
       });
       list.appendChild(row);
     }
-  } catch (e) { console.error(e); }
+  } catch (e) {
+    console.error(e);
+    list.innerHTML = '<p style="color:var(--danger);text-align:center;padding:24px">Gagal memuat sampah</p>';
+  }
 }
 
 $('emptyTrashBtn').addEventListener('click', async () => {
-  if (!confirm('Kosongkan sampah? Semua file akan dihapus permanen.')) return;
-  await fetch('/api/files/trash/empty', { method: 'DELETE' });
-  toast('Sampah dikosongkan');
-  loadTrash();
-  loadStats();
+  const confirmed = await showConfirm(
+    'Kosongkan Sampah?',
+    'Semua file di sampah akan dihapus permanen. Tindakan ini tidak bisa dibatalkan.',
+    true
+  );
+  if (!confirmed) return;
+  try {
+    await fetch('/api/files/trash/empty', { method: 'DELETE' });
+    toast('Sampah dikosongkan');
+    loadTrash();
+    loadStats();
+  } catch (e) {
+    toast('Error: Gagal mengosongkan sampah');
+  }
 });
 
 // ===== FAVORITES =====
 $('favBtn').addEventListener('click', async () => {
-  // Toggle favorites view
-  const res = await fetch('/api/files/favorites');
-  const data = await res.json();
-  const items = data.items || [];
+  try {
+    const res = await fetch('/api/files/favorites');
+    const data = await res.json();
+    const items = data.items || [];
 
-  if (items.length === 0) {
-    toast('Belum ada favorit');
-    return;
+    if (items.length === 0) {
+      toast('Belum ada favorit');
+      return;
+    }
+
+    allItems = items.map(i => ({ ...i, uploaded: i.addedAt, folder: '/' }));
+    searchQuery = '';
+    renderItems();
+    toast(`${items.length} favorit ditampilkan`);
+  } catch (e) {
+    toast('Error: Gagal memuat favorit');
   }
-
-  // Show favorites in a simple modal-like overlay
-  const grid = $('fileGrid');
-  const list = $('fileList');
-  $('emptyState').classList.add('hidden');
-
-  // Temporarily render favorites
-  allItems = items.map(i => ({ ...i, uploaded: i.addedAt, folder: '/' }));
-  searchQuery = '';
-  renderItems();
-  toast(`${items.length} favorit ditampilkan`);
 });
 
 async function toggleFavorite(item) {
-  const res = await fetch('/api/files/favorite', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key: item.key }),
-  });
-  const data = await res.json();
-  toast(data.favorite ? 'Ditambahkan ke favorit' : 'Dihapus dari favorit');
+  try {
+    const res = await fetch('/api/files/favorite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: item.key }),
+    });
+    const data = await res.json();
+    toast(data.favorite ? 'Ditambahkan ke favorit' : 'Dihapus dari favorit');
+  } catch (e) {
+    toast('Error: Gagal mengubah favorit');
+  }
 }
 
 // ===== UPLOAD BY URL =====
@@ -868,7 +1223,7 @@ $('uploadUrlBtn').addEventListener('click', (e) => {
 
 $('uploadUrlSubmit').addEventListener('click', async () => {
   const url = $('uploadUrlInput').value.trim();
-  if (!url) return;
+  if (!url) { $('uploadUrlInput').focus(); return; }
   $('uploadUrlMsg').textContent = 'Mengunduh...';
   $('uploadUrlMsg').style.color = 'var(--text-2)';
   $('uploadUrlSubmit').disabled = true;

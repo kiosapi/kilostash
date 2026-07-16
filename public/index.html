@@ -12,6 +12,20 @@
 </head>
 <body>
 
+<!-- CUSTOM DIALOG CONTAINER -->
+<div id="dialogOverlay" class="dialog-overlay hidden">
+  <div class="dialog-backdrop"></div>
+  <div class="dialog-card" id="dialogCard" role="dialog" aria-modal="true">
+    <h3 class="dialog-title" id="dialogTitle"></h3>
+    <p class="dialog-message hidden" id="dialogMessage"></p>
+    <input type="text" class="dialog-input hidden" id="dialogInput" autocomplete="off">
+    <div class="dialog-actions">
+      <button class="dialog-btn dialog-btn-cancel" id="dialogCancel">Batal</button>
+      <button class="dialog-btn dialog-btn-confirm" id="dialogConfirm">OK</button>
+    </div>
+  </div>
+</div>
+
 <!-- LOGIN -->
 <div id="loginScreen" class="login-screen">
   <div class="login-card">
@@ -87,23 +101,34 @@
       <p class="drop-zone-title">Tarik file ke sini</p>
       <p class="drop-zone-subtitle">atau klik untuk pilih</p>
       <input type="file" id="fileInput" multiple class="hidden">
-      <button id="newFolderBtn" class="btn-secondary">+ Folder Baru</button>
-      <button id="uploadUrlBtn" class="btn-secondary">Upload dari URL</button>
+      <div class="drop-zone-actions">
+        <button id="newFolderBtn" class="btn-secondary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+          Folder Baru
+        </button>
+        <button id="uploadUrlBtn" class="btn-secondary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          Upload dari URL
+        </button>
+      </div>
     </div>
   </div>
 
   <!-- Upload URL Modal -->
   <div id="uploadUrlModal" class="modal hidden">
     <div class="modal-backdrop" data-close></div>
-    <div class="modal-content modal-small">
+    <div class="modal-content modal-small animate-in">
       <div class="modal-header">
         <span class="modal-title">Upload dari URL</span>
         <button class="btn-icon" data-close><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
       <div class="modal-body share-body">
-        <label class="share-label">URL File</label>
+        <label class="form-label">URL File</label>
         <input type="url" id="uploadUrlInput" placeholder="https://..." class="login-input">
-        <button id="uploadUrlSubmit" class="btn-primary" style="margin-top:12px">Download & Simpan</button>
+        <button id="uploadUrlSubmit" class="btn-primary" style="margin-top:16px">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download & Simpan
+        </button>
         <p id="uploadUrlMsg" class="settings-msg"></p>
       </div>
     </div>
@@ -116,12 +141,17 @@
         <span id="trashCount" class="toolbar-count">0 item di sampah</span>
       </div>
       <div class="toolbar-right">
-        <button id="emptyTrashBtn" class="btn-text danger">Kosongkan Sampah</button>
+        <button id="emptyTrashBtn" class="btn-text danger">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+          Kosongkan Sampah
+        </button>
       </div>
     </div>
     <main class="main">
       <div id="trashEmptyState" class="empty-state">
-        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        <div class="empty-icon">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        </div>
         <p class="empty-title">Sampah kosong</p>
         <p class="empty-subtitle">File yang dihapus akan muncul di sini</p>
       </div>
@@ -157,17 +187,39 @@
   <!-- Bulk actions bar -->
   <div id="bulkBar" class="bulk-bar hidden">
     <span id="bulkCount">0 dipilih</span>
-    <button id="bulkDownload" class="btn-text">Download</button>
-    <button id="bulkDelete" class="btn-text danger">Hapus</button>
-    <button id="bulkCancel" class="btn-text">Batal</button>
+    <div class="bulk-actions-right">
+      <button id="bulkDownload" class="btn-text">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Download
+      </button>
+      <button id="bulkDelete" class="btn-text danger">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+        Hapus
+      </button>
+      <button id="bulkCancel" class="btn-text">Batal</button>
+    </div>
   </div>
 
   <!-- Files -->
   <main class="main">
-    <div id="emptyState" class="empty-state">
-      <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+    <div id="loadingState" class="empty-state hidden">
+      <div class="loading-spinner-lg"></div>
+      <p class="empty-subtitle" style="margin-top:16px">Memuat file...</p>
+    </div>
+    <div id="emptyState" class="empty-state hidden">
+      <div class="empty-icon">
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      </div>
       <p class="empty-title">Belum ada file</p>
       <p class="empty-subtitle">Upload file pertama untuk mulai</p>
+    </div>
+    <div id="errorState" class="empty-state hidden">
+      <div class="empty-icon error">
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="0.8"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      </div>
+      <p class="empty-title">Gagal memuat</p>
+      <p class="empty-subtitle">Periksa koneksi dan coba lagi</p>
+      <button class="btn-secondary" onclick="loadFiles();loadStats();" style="margin-top:16px">Coba Lagi</button>
     </div>
     <div id="fileGrid" class="file-grid"></div>
     <div id="fileList" class="file-list hidden"></div>
@@ -187,7 +239,7 @@
 <!-- PREVIEW MODAL -->
 <div id="previewModal" class="modal hidden">
   <div class="modal-backdrop" data-close></div>
-  <div class="modal-content">
+  <div class="modal-content animate-in">
     <div class="modal-header">
       <span id="previewName" class="modal-title"></span>
       <div class="modal-actions">
@@ -203,29 +255,48 @@
 <!-- SHARE MODAL -->
 <div id="shareModal" class="modal hidden">
   <div class="modal-backdrop" data-close></div>
-  <div class="modal-content modal-small">
+  <div class="modal-content modal-small animate-in">
     <div class="modal-header">
       <span class="modal-title">Share Link</span>
       <button class="btn-icon" data-close><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </div>
     <div class="modal-body share-body">
-      <label class="share-label">Tipe Share</label>
+      <label class="form-label">Tipe Share</label>
       <div class="share-options">
-        <label class="radio-label"><input type="radio" name="shareType" value="preview" checked> Preview (lihat langsung)</label>
-        <label class="radio-label"><input type="radio" name="shareType" value="download"> Download langsung</label>
+        <label class="radio-card">
+          <input type="radio" name="shareType" value="preview" checked>
+          <span class="radio-card-content">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            <span>Preview</span>
+            <span class="radio-card-desc">Lihat langsung di browser</span>
+          </span>
+        </label>
+        <label class="radio-card">
+          <input type="radio" name="shareType" value="download">
+          <span class="radio-card-content">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span>Download</span>
+            <span class="radio-card-desc">Langsung download file</span>
+          </span>
+        </label>
       </div>
-      <label class="share-label">Kedaluwarsa</label>
-      <select id="shareExpires" class="sort-select">
+      <label class="form-label" style="margin-top:20px">Kedaluwarsa</label>
+      <select id="shareExpires" class="sort-select" style="width:100%">
         <option value="0">Tidak pernah</option>
         <option value="1">1 jam</option>
         <option value="24">1 hari</option>
         <option value="168">7 hari</option>
         <option value="720">30 hari</option>
       </select>
-      <button id="createShareBtn" class="btn-primary" style="margin-top:16px">Buat Link</button>
+      <button id="createShareBtn" class="btn-primary" style="margin-top:20px">Buat Link</button>
       <div id="shareResult" class="share-result hidden">
-        <input id="shareUrl" class="login-input" readonly>
-        <button id="copyShareBtn" class="btn-primary" style="margin-top:8px">Salin Link</button>
+        <label class="form-label">Link Share</label>
+        <div class="share-link-row">
+          <input id="shareUrl" class="login-input" readonly style="margin-bottom:0">
+          <button id="copyShareBtn" class="btn-icon share-copy-btn" title="Salin">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -234,13 +305,16 @@
 <!-- SETTINGS MODAL -->
 <div id="settingsModal" class="modal hidden">
   <div class="modal-backdrop" data-close></div>
-  <div class="modal-content modal-small">
+  <div class="modal-content modal-small animate-in">
     <div class="modal-header">
       <span class="modal-title">Pengaturan</span>
       <button class="btn-icon" data-close><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </div>
     <div class="modal-body settings-body">
-      <h3 class="settings-section">Ganti Password</h3>
+      <h3 class="settings-section">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Ganti Password
+      </h3>
       <input type="password" id="currentPw" placeholder="Password lama" class="login-input">
       <input type="password" id="newPw" placeholder="Password baru" class="login-input">
       <input type="password" id="confirmPw" placeholder="Konfirmasi password baru" class="login-input">
@@ -249,7 +323,10 @@
 
       <hr class="settings-divider">
 
-      <h3 class="settings-section">Share Links Aktif</h3>
+      <h3 class="settings-section">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+        Share Links Aktif
+      </h3>
       <div id="shareLinksList" class="share-links-list"></div>
     </div>
   </div>
@@ -257,12 +334,33 @@
 
 <!-- CONTEXT MENU -->
 <div id="contextMenu" class="context-menu hidden">
-  <button data-action="preview" class="ctx-item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> Lihat</button>
-  <button data-action="download" class="ctx-item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Download</button>
-  <button data-action="rename" class="ctx-item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Rename</button>
-  <button data-action="share" class="ctx-item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg> Share</button>
-  <button data-action="favorite" class="ctx-item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> Favorit</button>
-  <button data-action="delete" class="ctx-item danger"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Hapus</button>
+  <div class="context-menu-inner">
+    <button data-action="preview" class="ctx-item">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+      <span>Lihat</span>
+    </button>
+    <button data-action="download" class="ctx-item">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      <span>Download</span>
+    </button>
+    <button data-action="rename" class="ctx-item">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      <span>Rename</span>
+    </button>
+    <button data-action="share" class="ctx-item">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+      <span>Share</span>
+    </button>
+    <button data-action="favorite" class="ctx-item">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      <span>Favorit</span>
+    </button>
+    <div class="ctx-divider"></div>
+    <button data-action="delete" class="ctx-item danger">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+      <span>Hapus</span>
+    </button>
+  </div>
 </div>
 
 <!-- TOAST -->
