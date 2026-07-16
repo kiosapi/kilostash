@@ -1,0 +1,10 @@
+name = "kilostash"
+compatibility_date = "2025-01-01"
+pages_build_output_dir = "public"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "kilostash"
+
+[vars]
+AUTH_PASSWORD = "changeme"
