@@ -180,7 +180,7 @@ files.post('/upload', async (c) => {
   return c.json({ files: results });
 });
 
-// DELETE /api/files/delete — Delete file(s)
+// DELETE /api/files/delete — Soft delete (move to trash)
 files.delete('/delete', async (c) => {
   const body = await c.req.json();
   const keys: string[] = body.keys;
@@ -189,7 +189,34 @@ files.delete('/delete', async (c) => {
   const results = [];
   for (const key of keys) {
     try {
-      await c.env.BUCKET.delete(key);
+      // Get object metadata before moving to trash
+      const head = await c.env.BUCKET.head(key);
+      if (!head) { results.push({ key, success: false }); continue; }
+
+      // Store trash metadata in KV
+      const trashData = {
+        key,
+        name: parseKey(key).name,
+        size: head.size,
+        type: getFileType(parseKey(key).name),
+        deletedAt: new Date().toISOString(),
+        uploaded: head.uploaded.toISOString(),
+      };
+      await c.env.KV.put('trash:' + key, JSON.stringify(trashData));
+
+      // Move object to trash prefix in R2
+      const trashKey = '__trash__/' + key;
+      const obj = await c.env.BUCKET.get(key);
+      if (obj) {
+        await c.env.BUCKET.put(trashKey, obj.body, {
+          httpMetadata: head.httpMetadata,
+        });
+        await c.env.BUCKET.delete(key);
+      }
+
+      // Remove from favorites if exists
+      await c.env.KV.delete('fav:' + key);
+
       results.push({ key, success: true });
     } catch {
       results.push({ key, success: false });
@@ -197,6 +224,151 @@ files.delete('/delete', async (c) => {
   }
 
   return c.json({ results });
+});
+
+// GET /api/files/trash — List trash items
+files.get('/trash', async (c) => {
+  const list = await c.env.KV.list({ prefix: 'trash:' });
+  const items = [];
+  for (const item of list.keys) {
+    const raw = await c.env.KV.get(item.name);
+    if (raw) items.push(JSON.parse(raw));
+  }
+  items.sort((a, b) => new Date(b.deletedAt).getTime() - new Date(a.deletedAt).getTime());
+  return c.json({ items });
+});
+
+// POST /api/files/restore — Restore from trash
+files.post('/restore', async (c) => {
+  const body = await c.req.json();
+  const { key } = body;
+  if (!key) return c.json({ error: 'key required' }, 400);
+
+  const trashKey = '__trash__/' + key;
+  const head = await c.env.BUCKET.head(trashKey);
+  if (!head) return c.json({ error: 'Not in trash' }, 404);
+
+  const obj = await c.env.BUCKET.get(trashKey);
+  if (!obj) return c.json({ error: 'Object not found' }, 404);
+
+  // Restore to original key
+  await c.env.BUCKET.put(key, obj.body, {
+    httpMetadata: head.httpMetadata,
+  });
+  await c.env.BUCKET.delete(trashKey);
+  await c.env.KV.delete('trash:' + key);
+
+  return c.json({ success: true, key });
+});
+
+// DELETE /api/files/trash/empty — Empty trash permanently
+files.delete('/trash/empty', async (c) => {
+  const list = await c.env.KV.list({ prefix: 'trash:' });
+  let deleted = 0;
+  for (const item of list.keys) {
+    const key = item.name.replace('trash:', '');
+    const trashKey = '__trash__/' + key;
+    await c.env.BUCKET.delete(trashKey);
+    await c.env.KV.delete(item.name);
+    deleted++;
+  }
+  return c.json({ success: true, deleted });
+});
+
+// DELETE /api/files/trash/:key — Permanently delete single trash item
+files.delete('/trash/*', async (c) => {
+  const key = c.req.path.replace('/api/files/trash/', '');
+  const decodedKey = decodeURIComponent(key);
+  const trashKey = '__trash__/' + decodedKey;
+
+  await c.env.BUCKET.delete(trashKey);
+  await c.env.KV.delete('trash:' + decodedKey);
+
+  return c.json({ success: true });
+});
+
+// POST /api/files/favorite — Toggle favorite
+files.post('/favorite', async (c) => {
+  const body = await c.req.json();
+  const { key } = body;
+  if (!key) return c.json({ error: 'key required' }, 400);
+
+  const favKey = 'fav:' + key;
+  const existing = await c.env.KV.get(favKey);
+
+  if (existing) {
+    await c.env.KV.delete(favKey);
+    return c.json({ favorite: false });
+  } else {
+    const head = await c.env.BUCKET.head(key);
+    await c.env.KV.put(favKey, JSON.stringify({
+      key,
+      name: parseKey(key).name,
+      size: head?.size || 0,
+      type: getFileType(parseKey(key).name),
+      addedAt: new Date().toISOString(),
+    }));
+    return c.json({ favorite: true });
+  }
+});
+
+// GET /api/files/favorites — List favorites
+files.get('/favorites', async (c) => {
+  const list = await c.env.KV.list({ prefix: 'fav:' });
+  const items = [];
+  for (const item of list.keys) {
+    const raw = await c.env.KV.get(item.name);
+    if (raw) items.push(JSON.parse(raw));
+  }
+  return c.json({ items });
+});
+
+// POST /api/files/upload-url — Upload from URL
+files.post('/upload-url', async (c) => {
+  const body = await c.req.json();
+  const { url, folder } = body;
+  if (!url) return c.json({ error: 'url required' }, 400);
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return c.json({ error: 'Failed to fetch URL' }, 400);
+
+    const buffer = await response.arrayBuffer();
+    const size = buffer.byteLength;
+    if (size > MAX_FILE_SIZE) return c.json({ error: 'File too large (max 200MB)' }, 400);
+
+    // Extract filename from URL
+    let filename = url.split('/').pop()?.split('?')[0] || 'download';
+    if (!filename.includes('.')) {
+      const ct = response.headers.get('content-type') || '';
+      const ext = ct.includes('image/jpeg') ? '.jpg'
+        : ct.includes('image/png') ? '.png'
+        : ct.includes('video/mp4') ? '.mp4'
+        : ct.includes('audio/mpeg') ? '.mp3'
+        : ct.includes('application/pdf') ? '.pdf'
+        : '';
+      filename += ext;
+    }
+
+    const prefix = folder === '/' || !folder ? '' : folder.replace(/^\/+|\/+$/g, '') + '/';
+    let finalKey = prefix + filename;
+    const existing = await c.env.BUCKET.head(finalKey);
+    if (existing) {
+      const ext = filename.lastIndexOf('.') >= 0 ? filename.slice(filename.lastIndexOf('.')) : '';
+      const base = ext ? filename.slice(0, filename.lastIndexOf('.')) : filename;
+      finalKey = prefix + `${base}-${Date.now()}${ext}`;
+    }
+
+    const contentType = response.headers.get('content-type') || 'application/octet-stream';
+
+    await c.env.BUCKET.put(finalKey, buffer, {
+      httpMetadata: { contentType },
+    });
+
+    return c.json({ success: true, key: finalKey, name: filename, size });
+  } catch (e) {
+    return c.json({ error: 'Failed to download: ' + (e as Error).message }, 500);
+  }
 });
 
 // POST /api/files/rename — Rename file

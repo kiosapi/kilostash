@@ -696,6 +696,7 @@ $('contextMenu').querySelectorAll('.ctx-item').forEach(btn => {
     if (act === 'download') downloadFile(contextItem);
     if (act === 'rename') renameFile(contextItem);
     if (act === 'share') openShareModal(contextItem);
+    if (act === 'favorite') toggleFavorite(contextItem);
     if (act === 'delete') deleteFiles([contextItem.key]);
     $('contextMenu').classList.add('hidden');
     contextItem = null;
@@ -718,6 +719,183 @@ function closeAllModals() {
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeAllModals();
+  // Keyboard shortcuts
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (e.key === '/') { e.preventDefault(); $('searchBtn').click(); }
+  if (e.key === 'Delete' && selectedItems.size > 0) { $('bulkDelete').click(); }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'a') { e.preventDefault(); selectAllVisible(); }
+});
+
+function selectAllVisible() {
+  allItems.forEach(i => { if (i.type !== 'folder') selectedItems.add(i.key); });
+  updateBulkBar();
+  renderItems();
+}
+
+// ===== TRASH =====
+let trashView = false;
+
+$('trashBtn').addEventListener('click', () => {
+  trashView = !trashView;
+  if (trashView) {
+    $('dropZone').classList.add('hidden');
+    $('toolbar').classList.add('hidden');
+    $('fileGrid').classList.add('hidden');
+    $('fileList').classList.add('hidden');
+    $('emptyState').classList.add('hidden');
+    $('breadcrumb').classList.add('hidden');
+    $('trashView').classList.remove('hidden');
+    loadTrash();
+  } else {
+    exitTrashView();
+  }
+});
+
+function exitTrashView() {
+  $('dropZone').classList.remove('hidden');
+  $('toolbar').classList.remove('hidden');
+  $('breadcrumb').classList.remove('hidden');
+  $('trashView').classList.add('hidden');
+  loadFiles();
+}
+
+async function loadTrash() {
+  try {
+    const res = await fetch('/api/files/trash');
+    if (!res.ok) return;
+    const data = await res.json();
+    const items = data.items || [];
+    $('trashCount').textContent = items.length + ' item di sampah';
+    const list = $('trashList');
+    const empty = $('trashEmptyState');
+    list.innerHTML = '';
+
+    if (items.length === 0) {
+      empty.classList.remove('hidden');
+      list.classList.add('hidden');
+      return;
+    }
+    empty.classList.add('hidden');
+    list.classList.remove('hidden');
+
+    for (const item of items) {
+      const row = document.createElement('div');
+      row.className = 'file-row';
+      const meta = `${formatSize(item.size)} · ${formatDate(item.deletedAt)}`;
+      row.innerHTML = `
+        <div class="file-row-icon">${fileIcon(item.type)}</div>
+        <div class="file-row-info">
+          <div class="file-row-name">${escapeHtml(item.name)}</div>
+          <div class="file-row-meta">${meta}</div>
+        </div>
+        <div class="file-row-actions">
+          <button class="btn-icon" data-act="restore" title="Kembalikan"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>
+          <button class="btn-icon" data-act="delete" title="Hapus permanen" style="color:var(--danger)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></button>
+        </div>
+      `;
+      row.querySelector('[data-act="restore"]').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await fetch('/api/files/restore', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: item.key }),
+        });
+        toast('File dikembalikan');
+        loadTrash();
+        loadStats();
+      });
+      row.querySelector('[data-act="delete"]').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!confirm('Hapus permanen? Tidak bisa dibatalkan.')) return;
+        await fetch(`/api/files/trash/${encodeURIComponent(item.key)}`, { method: 'DELETE' });
+        toast('File dihapus permanen');
+        loadTrash();
+        loadStats();
+      });
+      list.appendChild(row);
+    }
+  } catch (e) { console.error(e); }
+}
+
+$('emptyTrashBtn').addEventListener('click', async () => {
+  if (!confirm('Kosongkan sampah? Semua file akan dihapus permanen.')) return;
+  await fetch('/api/files/trash/empty', { method: 'DELETE' });
+  toast('Sampah dikosongkan');
+  loadTrash();
+  loadStats();
+});
+
+// ===== FAVORITES =====
+$('favBtn').addEventListener('click', async () => {
+  // Toggle favorites view
+  const res = await fetch('/api/files/favorites');
+  const data = await res.json();
+  const items = data.items || [];
+
+  if (items.length === 0) {
+    toast('Belum ada favorit');
+    return;
+  }
+
+  // Show favorites in a simple modal-like overlay
+  const grid = $('fileGrid');
+  const list = $('fileList');
+  $('emptyState').classList.add('hidden');
+
+  // Temporarily render favorites
+  allItems = items.map(i => ({ ...i, uploaded: i.addedAt, folder: '/' }));
+  searchQuery = '';
+  renderItems();
+  toast(`${items.length} favorit ditampilkan`);
+});
+
+async function toggleFavorite(item) {
+  const res = await fetch('/api/files/favorite', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: item.key }),
+  });
+  const data = await res.json();
+  toast(data.favorite ? 'Ditambahkan ke favorit' : 'Dihapus dari favorit');
+}
+
+// ===== UPLOAD BY URL =====
+$('uploadUrlBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  $('uploadUrlModal').classList.remove('hidden');
+  $('uploadUrlInput').focus();
+});
+
+$('uploadUrlSubmit').addEventListener('click', async () => {
+  const url = $('uploadUrlInput').value.trim();
+  if (!url) return;
+  $('uploadUrlMsg').textContent = 'Mengunduh...';
+  $('uploadUrlMsg').style.color = 'var(--text-2)';
+  $('uploadUrlSubmit').disabled = true;
+
+  try {
+    const res = await fetch('/api/files/upload-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, folder: currentFolder }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      $('uploadUrlMsg').textContent = data.error;
+      $('uploadUrlMsg').style.color = 'var(--danger)';
+    } else {
+      $('uploadUrlMsg').textContent = `Berhasil: ${data.name} (${formatSize(data.size)})`;
+      $('uploadUrlMsg').style.color = 'var(--success)';
+      $('uploadUrlInput').value = '';
+      await loadFiles();
+      await loadStats();
+      setTimeout(() => { closeAllModals(); $('uploadUrlMsg').textContent = ''; }, 1500);
+    }
+  } catch (e) {
+    $('uploadUrlMsg').textContent = 'Gagal: ' + e.message;
+    $('uploadUrlMsg').style.color = 'var(--danger)';
+  }
+  $('uploadUrlSubmit').disabled = false;
 });
 
 // ===== INIT =====
