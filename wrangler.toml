@@ -2,6 +2,10 @@ name = "kilostash"
 compatibility_date = "2025-07-01"
 main = "src/index.ts"
 
+routes = [
+  { pattern = "cloud.lexa.web.id/*", zone_name = "lexa.web.id" }
+]
+
 [assets]
 directory = "./public"
 binding = "ASSETS"
