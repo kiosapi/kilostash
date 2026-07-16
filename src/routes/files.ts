@@ -21,6 +21,9 @@ files.get('/', async (c) => {
   const folders = new Set<string>();
 
   for (const obj of listed.objects) {
+    // Skip trash system files
+    if (obj.key.startsWith('__trash__/') || obj.key.endsWith('/.keep')) continue;
+
     const relativeKey = prefix ? obj.key.slice(prefix.length) : obj.key;
     // If there's a subfolder, add it to folders set
     const slashIdx = relativeKey.indexOf('/');
@@ -59,6 +62,7 @@ files.get('/stats', async (c) => {
   const byType: Record<string, { count: number; size: number }> = {};
 
   for (const obj of listed.objects) {
+    if (obj.key.startsWith('__trash__/') || obj.key.endsWith('/.keep')) continue;
     totalSize += obj.size;
     totalFiles++;
     const { name } = parseKey(obj.key);
