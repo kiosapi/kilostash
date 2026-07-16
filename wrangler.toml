@@ -1,8 +1,15 @@
 name = "kilostash"
-compatibility_date = "2025-01-01"
-pages_build_output_dir = "public"
+compatibility_date = "2025-07-01"
+main = "src/index.ts"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
 
 [[r2_buckets]]
 binding = "BUCKET"
 bucket_name = "kilostash"
 
+[[kv_namespaces]]
+binding = "KV"
+id = "d6fb2c14bf3147a2a5ec3c9bd48bbe5b"

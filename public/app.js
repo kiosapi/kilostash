@@ -1,163 +1,178 @@
-// KiloStash — Frontend logic
-const API = '/api/file';
-let authToken = localStorage.getItem('kilostash_token') || '';
+// KiloStash 2.0 — Frontend
+let currentFolder = '/';
 let currentView = 'grid';
+let allItems = [];
+let selectedItems = new Set();
+let sortMode = 'date-desc';
+let searchQuery = '';
+let contextItem = null;
+
+// ===== UTILS =====
+const $ = id => document.getElementById(id);
+const qs = (s, p = document) => p.querySelector(s);
+const qsa = (s, p = document) => [...p.querySelectorAll(s)];
+
+function formatSize(b) {
+  if (!b) return '0 B';
+  const u = ['B','KB','MB','GB','TB'];
+  const i = Math.floor(Math.log(b) / Math.log(1024));
+  return (b / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1) + ' ' + u[i];
+}
+
+function formatDate(iso) {
+  const d = new Date(iso), now = new Date(), diff = now - d;
+  if (diff < 60000) return 'Baru saja';
+  if (diff < 3600000) return Math.floor(diff / 60000) + 'm lalu';
+  if (diff < 86400000) return Math.floor(diff / 3600000) + 'j lalu';
+  if (diff < 604800000) return Math.floor(diff / 86400000) + 'h lalu';
+  return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function toast(msg) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.remove('hidden');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.add('hidden'), 2500);
+}
+
+function fileIcon(type) {
+  const i = {
+    image: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',
+    video: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>',
+    audio: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+    pdf: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',
+    document: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
+    archive: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>',
+    code: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+    folder: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
+    file: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',
+  };
+  return i[type] || i.file;
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
 
 // ===== AUTH =====
-const loginScreen = document.getElementById('loginScreen');
-const app = document.getElementById('app');
-const passwordInput = document.getElementById('passwordInput');
-const loginBtn = document.getElementById('loginBtn');
-const loginError = document.getElementById('loginError');
-const logoutBtn = document.getElementById('logoutBtn');
+async function checkAuth() {
+  try {
+    const res = await fetch('/api/auth/check');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.authed) {
+        $('siteName').textContent = data.siteName || 'KiloStash';
+        showApp();
+        return;
+      }
+    }
+  } catch {}
+  showLogin();
+}
+
+function showLogin() {
+  $('loginScreen').classList.remove('hidden');
+  $('app').classList.add('hidden');
+  $('passwordInput').focus();
+}
+
+function showApp() {
+  $('loginScreen').classList.add('hidden');
+  $('app').classList.remove('hidden');
+  loadFiles();
+  loadStats();
+}
 
 async function login() {
-  const pw = passwordInput.value;
+  const pw = $('passwordInput').value;
   if (!pw) return;
-  loginBtn.disabled = true;
-  loginError.textContent = '';
+  $('loginBtn').disabled = true;
+  $('loginError').textContent = '';
   try {
-    const res = await fetch('/api/auth', {
+    const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password: pw }),
     });
-    if (!res.ok) throw new Error('Wrong password');
-    const data = await res.json();
-    authToken = data.token;
-    localStorage.setItem('kilostash_token', authToken);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Password salah');
+    }
     showApp();
   } catch (e) {
-    loginError.textContent = 'Password salah';
-    passwordInput.value = '';
+    $('loginError').textContent = e.message;
+    $('passwordInput').value = '';
   }
-  loginBtn.disabled = false;
+  $('loginBtn').disabled = false;
 }
 
 function logout() {
-  authToken = '';
-  localStorage.removeItem('kilostash_token');
-  app.classList.add('hidden');
-  loginScreen.classList.remove('hidden');
-  passwordInput.value = '';
-  passwordInput.focus();
-}
-
-function showApp() {
-  loginScreen.classList.add('hidden');
-  app.classList.remove('hidden');
-  loadFiles();
-}
-
-loginBtn.addEventListener('click', login);
-passwordInput.addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
-logoutBtn.addEventListener('click', logout);
-
-// Auto-login if token exists
-if (authToken) {
-  fetch('/api/auth', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token: authToken }),
-  }).then(res => {
-    if (res.ok) showApp();
-    else { authToken = ''; localStorage.removeItem('kilostash_token'); }
-  }).catch(() => {});
-}
-
-// ===== FILE TYPES =====
-function getFileType(name) {
-  const ext = name.split('.').pop().toLowerCase();
-  if (['jpg','jpeg','png','gif','webp','bmp','svg','heic'].includes(ext)) return 'image';
-  if (['mp4','webm','mov','avi','mkv','m4v'].includes(ext)) return 'video';
-  if (['mp3','wav','flac','aac','ogg','m4a'].includes(ext)) return 'audio';
-  if (['pdf'].includes(ext)) return 'pdf';
-  if (['doc','docx','txt','md','rtf'].includes(ext)) return 'document';
-  if (['zip','rar','7z','tar','gz'].includes(ext)) return 'archive';
-  if (['js','ts','py','go','rs','java','c','cpp','html','css','json','xml','yaml','yml','sh','bat','sql','php','rb','vue','jsx','tsx'].includes(ext)) return 'code';
-  return 'file';
-}
-
-function fileIcon(type) {
-  const icons = {
-    image: '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',
-    video: '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>',
-    audio: '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
-    pdf: '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/></svg>',
-    document: '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
-    archive: '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>',
-    code: '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
-    file: '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',
-  };
-  return icons[type] || icons.file;
-}
-
-// ===== FORMAT =====
-function formatSize(bytes) {
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-  return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
-}
-
-function formatDate(iso) {
-  const d = new Date(iso);
-  const now = new Date();
-  const diff = now - d;
-  if (diff < 60000) return 'Baru saja';
-  if (diff < 3600000) return Math.floor(diff / 60000) + ' menit lalu';
-  if (diff < 86400000) return Math.floor(diff / 3600000) + ' jam lalu';
-  if (diff < 604800000) return Math.floor(diff / 86400000) + ' hari lalu';
-  return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
-function formatSizeShort(bytes) {
-  if (bytes < 1024 * 1024) return Math.ceil(bytes / 1024) + ' KB';
-  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-  return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
-}
-
-// ===== API HELPERS =====
-async function apiCall(path, options = {}) {
-  const res = await fetch(API + path, {
-    ...options,
-    headers: { ...options.headers, 'Authorization': 'Bearer ' + authToken },
+  fetch('/api/auth/logout', { method: 'POST' }).then(() => {
+    showLogin();
+    $('passwordInput').value = '';
   });
-  if (res.status === 401) { logout(); throw new Error('Unauthorized'); }
-  return res;
 }
 
-// ===== FILE LIST =====
-let allFiles = [];
+$('loginBtn').addEventListener('click', login);
+$('passwordInput').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+$('logoutBtn').addEventListener('click', logout);
 
+// ===== FILES =====
 async function loadFiles() {
   try {
-    const res = await apiCall('/list');
-    if (!res.ok) throw new Error('Failed');
+    const res = await fetch(`/api/files?folder=${encodeURIComponent(currentFolder)}`);
+    if (!res.ok) return;
     const data = await res.json();
-    allFiles = data.files || [];
-    renderFiles();
-    updateStorage();
-  } catch (e) {
-    console.error(e);
+    allItems = [...(data.folders || []), ...(data.files || [])];
+    renderItems();
+  } catch (e) { console.error(e); }
+}
+
+async function loadStats() {
+  try {
+    const res = await fetch('/api/files/stats');
+    if (!res.ok) return;
+    const data = await res.json();
+    const pct = (data.totalSize / (10 * 1024 * 1024 * 1024)) * 100;
+    $('storageBarFill').style.width = Math.min(pct, 100) + '%';
+    $('storageText').textContent = `${formatSize(data.totalSize)} / 10 GB`;
+  } catch {}
+}
+
+function renderItems() {
+  let items = allItems;
+
+  // Search filter
+  if (searchQuery) {
+    items = items.filter(i => i.name.toLowerCase().includes(searchQuery));
   }
-}
 
-function updateStorage() {
-  const total = allFiles.reduce((s, f) => s + (f.size || 0), 0);
-  const info = document.getElementById('storageInfo');
-  info.textContent = formatSizeShort(total) + ' / 10 GB';
-}
+  // Sort
+  const folders = items.filter(i => i.type === 'folder');
+  const files = items.filter(i => i.type !== 'folder');
+  const sortFn = (a, b) => {
+    switch (sortMode) {
+      case 'name-asc': return a.name.localeCompare(b.name);
+      case 'name-desc': return b.name.localeCompare(a.name);
+      case 'date-asc': return new Date(a.uploaded) - new Date(b.uploaded);
+      case 'date-desc': return new Date(b.uploaded) - new Date(a.uploaded);
+      case 'size-asc': return (a.size || 0) - (b.size || 0);
+      case 'size-desc': return (b.size || 0) - (a.size || 0);
+    }
+  };
+  folders.sort((a, b) => a.name.localeCompare(b.name));
+  files.sort(sortFn);
+  items = [...folders, ...files];
 
-function renderFiles() {
-  const grid = document.getElementById('fileGrid');
-  const list = document.getElementById('fileList');
-  const empty = document.getElementById('emptyState');
-  const count = document.getElementById('fileCount');
+  const grid = $('fileGrid');
+  const list = $('fileList');
+  const empty = $('emptyState');
+  $('fileCount').textContent = items.length + ' item';
 
-  count.textContent = allFiles.length + ' File';
-
-  if (allFiles.length === 0) {
+  if (items.length === 0) {
     empty.classList.remove('hidden');
     grid.classList.add('hidden');
     list.classList.add('hidden');
@@ -168,228 +183,542 @@ function renderFiles() {
   grid.innerHTML = '';
   list.innerHTML = '';
 
-  allFiles.forEach(file => {
-    const type = getFileType(file.name);
-
+  items.forEach(item => {
     if (currentView === 'grid') {
-      const card = document.createElement('div');
-      card.className = 'file-card';
-      card.onclick = () => previewFile(file);
-
-      let thumb = '';
-      if (type === 'image') {
-        thumb = `<img src="/api/file/preview/${encodeURIComponent(file.name)}" loading="lazy" alt="${file.name}">`;
-      } else if (type === 'video') {
-        thumb = `<video src="/api/file/preview/${encodeURIComponent(file.name)}" preload="metadata" muted></video>`;
-      } else {
-        thumb = `<div class="file-thumb-icon">${fileIcon(type)}</div>`;
-      }
-
-      card.innerHTML = `
-        <div class="file-thumb">${thumb}</div>
-        <div class="file-actions">
-          <button class="file-action-btn" onclick="event.stopPropagation();downloadFile('${file.name}')" title="Download">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          </button>
-          <button class="file-action-btn danger" onclick="event.stopPropagation();deleteFile('${file.name}')" title="Hapus">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-          </button>
-        </div>
-        <div class="file-card-info">
-          <div class="file-card-name">${file.name}</div>
-          <div class="file-card-meta">${formatSize(file.size)} · ${formatDate(file.uploaded)}</div>
-        </div>
-      `;
-      grid.appendChild(card);
+      grid.appendChild(makeGridCard(item));
     } else {
-      const row = document.createElement('div');
-      row.className = 'file-row';
-      row.onclick = () => previewFile(file);
-      row.innerHTML = `
-        <div class="file-row-icon">${fileIcon(type)}</div>
-        <div class="file-row-info">
-          <div class="file-row-name">${file.name}</div>
-          <div class="file-row-meta">${formatSize(file.size)} · ${formatDate(file.uploaded)}</div>
-        </div>
-        <div class="file-row-actions" style="display:flex;gap:4px;">
-          <button class="btn-icon" onclick="event.stopPropagation();downloadFile('${file.name}')" title="Download">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          </button>
-          <button class="btn-icon" onclick="event.stopPropagation();deleteFile('${file.name}')" title="Hapus" style="color:var(--danger)">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-          </button>
-        </div>
-      `;
-      list.appendChild(row);
+      list.appendChild(makeListRow(item));
     }
   });
 
-  if (currentView === 'grid') {
-    grid.classList.remove('hidden');
-    list.classList.add('hidden');
-  } else {
-    grid.classList.add('hidden');
-    list.classList.remove('hidden');
-  }
+  (currentView === 'grid' ? grid : list).classList.remove('hidden');
+  (currentView === 'grid' ? list : grid).classList.add('hidden');
 }
 
-// ===== VIEW TOGGLE =====
-document.getElementById('gridViewBtn').addEventListener('click', () => {
-  currentView = 'grid';
-  document.getElementById('gridViewBtn').classList.add('active');
-  document.getElementById('listViewBtn').classList.remove('active');
-  renderFiles();
-});
+function makeGridCard(item) {
+  const card = document.createElement('div');
+  const isFolder = item.type === 'folder';
+  card.className = 'file-card' + (isFolder ? ' folder' : '') + (selectedItems.has(item.key) ? ' selected' : '');
+  card.dataset.key = item.key;
 
-document.getElementById('listViewBtn').addEventListener('click', () => {
-  currentView = 'list';
-  document.getElementById('listViewBtn').classList.add('active');
-  document.getElementById('gridViewBtn').classList.remove('active');
-  renderFiles();
+  let thumb = '';
+  if (isFolder) {
+    thumb = `<div class="file-thumb-icon">${fileIcon('folder')}</div>`;
+  } else if (item.type === 'image') {
+    thumb = `<img src="/api/files/preview/${encodeURIComponent(item.key)}" loading="lazy" alt="${escapeHtml(item.name)}">`;
+  } else if (item.type === 'video') {
+    thumb = `<video src="/api/files/preview/${encodeURIComponent(item.key)}" preload="metadata" muted></video>`;
+  } else {
+    thumb = `<div class="file-thumb-icon">${fileIcon(item.type)}</div>`;
+  }
+
+  const meta = isFolder ? 'Folder' : `${formatSize(item.size)} · ${formatDate(item.uploaded)}`;
+
+  card.innerHTML = `
+    <div class="file-thumb">${thumb}</div>
+    <input type="checkbox" class="file-select-checkbox" ${selectedItems.has(item.key) ? 'checked' : ''}>
+    ${!isFolder ? `<div class="file-actions">
+      <button class="file-action-btn" data-act="download"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
+      <button class="file-action-btn danger" data-act="delete"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+    </div>` : ''}
+    <div class="file-card-info">
+      <div class="file-card-name">${escapeHtml(item.name)}</div>
+      <div class="file-card-meta">${meta}</div>
+    </div>
+  `;
+
+  card.addEventListener('click', e => {
+    if (e.target.closest('.file-action-btn') || e.target.closest('.file-select-checkbox')) return;
+    if (isFolder) {
+      currentFolder = item.folder === '/' ? '/' + item.name : item.folder + '/' + item.name;
+      updateBreadcrumb();
+      loadFiles();
+    } else {
+      previewFile(item);
+    }
+  });
+
+  // Checkbox
+  const cb = card.querySelector('.file-select-checkbox');
+  if (cb) cb.addEventListener('change', e => {
+    if (e.target.checked) selectedItems.add(item.key);
+    else selectedItems.delete(item.key);
+    updateBulkBar();
+    renderItems();
+  });
+
+  // Action buttons
+  card.querySelectorAll('[data-act]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const act = btn.dataset.act;
+      if (act === 'download') downloadFile(item);
+      if (act === 'delete') deleteFiles([item.key]);
+    });
+  });
+
+  // Long press for context menu (mobile)
+  let pressTimer;
+  card.addEventListener('touchstart', e => {
+    pressTimer = setTimeout(() => showContextMenu(e, item), 500);
+  });
+  card.addEventListener('touchend', () => clearTimeout(pressTimer));
+
+  // Right click
+  card.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    showContextMenu(e, item);
+  });
+
+  return card;
+}
+
+function makeListRow(item) {
+  const row = document.createElement('div');
+  const isFolder = item.type === 'folder';
+  row.className = 'file-row' + (isFolder ? ' folder' : '') + (selectedItems.has(item.key) ? ' selected' : '');
+  row.dataset.key = item.key;
+
+  const meta = isFolder ? 'Folder' : `${formatSize(item.size)} · ${formatDate(item.uploaded)}`;
+
+  row.innerHTML = `
+    <div class="file-row-icon" style="${isFolder ? 'color:var(--accent)' : ''}">${fileIcon(isFolder ? 'folder' : item.type)}</div>
+    <div class="file-row-info">
+      <div class="file-row-name">${escapeHtml(item.name)}</div>
+      <div class="file-row-meta">${meta}</div>
+    </div>
+    <div class="file-row-actions">
+      <button class="btn-icon" data-act="download" title="Download"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
+      <button class="btn-icon" data-act="share" title="Share"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg></button>
+      <button class="btn-icon" data-act="rename" title="Rename"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+      <button class="btn-icon" data-act="delete" title="Hapus" style="color:var(--danger)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+    </div>
+  `;
+
+  row.addEventListener('click', e => {
+    if (e.target.closest('[data-act]') || e.target.closest('.file-select-checkbox')) return;
+    if (isFolder) {
+      currentFolder = item.folder === '/' ? '/' + item.name : item.folder + '/' + item.name;
+      updateBreadcrumb();
+      loadFiles();
+    } else {
+      previewFile(item);
+    }
+  });
+
+  row.querySelectorAll('[data-act]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const act = btn.dataset.act;
+      if (act === 'download') downloadFile(item);
+      if (act === 'delete') deleteFiles([item.key]);
+      if (act === 'rename') renameFile(item);
+      if (act === 'share') openShareModal(item);
+    });
+  });
+
+  let pressTimer;
+  row.addEventListener('touchstart', e => {
+    pressTimer = setTimeout(() => showContextMenu(e, item), 500);
+  });
+  row.addEventListener('touchend', () => clearTimeout(pressTimer));
+
+  row.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    showContextMenu(e, item);
+  });
+
+  return row;
+}
+
+// ===== BREADCRUMB =====
+function updateBreadcrumb() {
+  const bc = $('breadcrumb');
+  const inner = bc.querySelector('.breadcrumb-inner');
+  inner.innerHTML = '';
+
+  const parts = currentFolder === '/' ? [] : currentFolder.split('/').filter(Boolean);
+  let path = '/';
+
+  const home = document.createElement('span');
+  home.className = 'crumb' + (currentFolder === '/' ? ' active' : '');
+  home.textContent = 'Beranda';
+  home.dataset.folder = '/';
+  home.addEventListener('click', () => { currentFolder = '/'; updateBreadcrumb(); loadFiles(); });
+  inner.appendChild(home);
+
+  parts.forEach((part, i) => {
+    path += (i === 0 ? '' : '/') + part;
+    const sep = document.createElement('span');
+    sep.className = 'crumb-sep';
+    sep.textContent = '/';
+    inner.appendChild(sep);
+
+    const crumb = document.createElement('span');
+    crumb.className = 'crumb' + (i === parts.length - 1 ? ' active' : '');
+    crumb.textContent = part;
+    crumb.dataset.folder = path;
+    crumb.addEventListener('click', () => { currentFolder = path; updateBreadcrumb(); loadFiles(); });
+    inner.appendChild(crumb);
+  });
+
+  $('backBtn').classList.toggle('hidden', currentFolder === '/');
+}
+
+$('backBtn').addEventListener('click', () => {
+  if (currentFolder === '/') return;
+  const parts = currentFolder.split('/').filter(Boolean);
+  parts.pop();
+  currentFolder = parts.length === 0 ? '/' : '/' + parts.join('/');
+  updateBreadcrumb();
+  loadFiles();
 });
 
 // ===== UPLOAD =====
-const dropZone = document.getElementById('dropZone');
-const fileInput = document.getElementById('fileInput');
+const dropZone = $('dropZone');
+const fileInput = $('fileInput');
 
-dropZone.addEventListener('click', () => fileInput.click());
-
-dropZone.addEventListener('dragover', e => {
-  e.preventDefault();
-  dropZone.classList.add('dragover');
+dropZone.addEventListener('click', e => {
+  if (e.target.id === 'newFolderBtn' || e.target.closest('#newFolderBtn')) return;
+  fileInput.click();
 });
 
-dropZone.addEventListener('dragleave', () => {
-  dropZone.classList.remove('dragover');
-});
-
-dropZone.addEventListener('drop', e => {
-  e.preventDefault();
-  dropZone.classList.remove('dragover');
-  handleFiles(e.dataTransfer.files);
-});
-
-fileInput.addEventListener('change', e => {
-  handleFiles(e.target.files);
-  fileInput.value = '';
-});
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragover'); handleFiles(e.dataTransfer.files); });
+fileInput.addEventListener('change', e => { handleFiles(e.target.files); fileInput.value = ''; });
 
 async function handleFiles(files) {
-  const progress = document.getElementById('uploadProgress');
+  if (!files.length) return;
+  const progress = $('uploadProgress');
   progress.classList.remove('hidden');
   progress.innerHTML = '';
 
-  for (const file of files) {
-    const item = document.createElement('div');
-    item.className = 'upload-item';
-    item.innerHTML = `
-      <span class="upload-item-name">${file.name}</span>
-      <div class="upload-item-bar"><div class="upload-item-fill" style="width:0%"></div></div>
-      <span class="upload-item-status">0%</span>
-    `;
-    progress.appendChild(item);
+  // Upload all files in one request
+  const formData = new FormData();
+  formData.append('folder', currentFolder);
+  for (const f of files) formData.append('file', f);
 
-    const fill = item.querySelector('.upload-item-fill');
-    const status = item.querySelector('.upload-item-status');
+  // Create progress items
+  const items = [...files].map(f => {
+    const div = document.createElement('div');
+    div.className = 'upload-item';
+    div.innerHTML = `<span class="upload-item-name">${escapeHtml(f.name)}</span><div class="upload-item-bar"><div class="upload-item-fill" style="width:0%"></div></div><span class="upload-item-status">0%</span>`;
+    progress.appendChild(div);
+    return div;
+  });
 
-    try {
-      const xhr = new XMLHttpRequest();
-      await new Promise((resolve, reject) => {
-        xhr.upload.addEventListener('progress', e => {
-          if (e.lengthComputable) {
-            const pct = Math.round(e.loaded / e.total * 100);
-            fill.style.width = pct + '%';
-            status.textContent = pct + '%';
-          }
-        });
-        xhr.addEventListener('load', () => {
-          if (xhr.status === 200) {
-            fill.style.width = '100%';
-            status.textContent = '✓';
-            status.style.color = 'var(--success)';
-            resolve();
-          } else {
-            reject(new Error('Upload failed: ' + xhr.status));
-          }
-        });
-        xhr.addEventListener('error', () => reject(new Error('Network error')));
-        xhr.open('POST', API + '/upload');
-        xhr.setRequestHeader('Authorization', 'Bearer ' + authToken);
-        const formData = new FormData();
-        formData.append('file', file);
-        xhr.send(formData);
+  const xhr = new XMLHttpRequest();
+  xhr.upload.addEventListener('progress', e => {
+    if (e.lengthComputable) {
+      const pct = Math.round(e.loaded / e.total * 100);
+      items.forEach(item => {
+        item.querySelector('.upload-item-fill').style.width = pct + '%';
+        item.querySelector('.upload-item-status').textContent = pct + '%';
       });
-    } catch (e) {
-      status.textContent = '✕';
-      status.style.color = 'var(--danger)';
-      console.error(e);
     }
-  }
+  });
+
+  await new Promise(resolve => {
+    xhr.addEventListener('load', () => {
+      items.forEach(item => {
+        item.querySelector('.upload-item-fill').style.width = '100%';
+        item.querySelector('.upload-item-status').textContent = '✓';
+        item.querySelector('.upload-item-status').style.color = 'var(--success)';
+      });
+      resolve();
+    });
+    xhr.addEventListener('error', () => {
+      items.forEach(item => {
+        item.querySelector('.upload-item-status').textContent = '✕';
+        item.querySelector('.upload-item-status').style.color = 'var(--danger)';
+      });
+      resolve();
+    });
+    xhr.open('POST', '/api/files/upload');
+    xhr.send(formData);
+  });
 
   await loadFiles();
-  setTimeout(() => {
-    progress.classList.add('hidden');
-    progress.innerHTML = '';
-  }, 1500);
+  await loadStats();
+  setTimeout(() => { progress.classList.add('hidden'); progress.innerHTML = ''; }, 1500);
 }
 
-// ===== PREVIEW =====
-function previewFile(file) {
-  const modal = document.getElementById('previewModal');
-  const name = document.getElementById('previewName');
-  const body = document.getElementById('previewBody');
-  const type = getFileType(file.name);
+// ===== NEW FOLDER =====
+$('newFolderBtn').addEventListener('click', e => {
+  e.stopPropagation();
+  const name = prompt('Nama folder:');
+  if (!name) return;
+  fetch('/api/files/folder', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: currentFolder === '/' ? name : currentFolder + '/' + name }),
+  }).then(() => { loadFiles(); toast('Folder dibuat'); });
+});
 
-  name.textContent = file.name;
+// ===== PREVIEW =====
+function previewFile(item) {
+  const modal = $('previewModal');
+  $('previewName').textContent = item.name;
+  $('previewDownload').onclick = () => downloadFile(item);
+  $('previewShare').onclick = () => { closeAllModals(); openShareModal(item); };
+  const body = $('previewBody');
   body.innerHTML = '<div class="loading-center"><div class="loading-spinner"></div></div>';
   modal.classList.remove('hidden');
 
-  const url = `/api/file/preview/${encodeURIComponent(file.name)}`;
+  const url = `/api/files/preview/${encodeURIComponent(item.key)}`;
 
-  if (type === 'image') {
-    body.innerHTML = `<img src="${url}" alt="${file.name}" onclick="window.open('${url}','_blank')">`;
-  } else if (type === 'video') {
+  if (item.type === 'image') {
+    body.innerHTML = `<img src="${url}" alt="${escapeHtml(item.name)}">`;
+  } else if (item.type === 'video') {
     body.innerHTML = `<video src="${url}" controls playsinline></video>`;
-  } else if (type === 'audio') {
+  } else if (item.type === 'audio') {
     body.innerHTML = `<audio src="${url}" controls></audio>`;
-  } else if (type === 'pdf') {
-    body.innerHTML = `<iframe src="${url}" style="width:100%;height:70vh;border:none;border-radius:var(--radius)"></iframe>`;
+  } else if (item.type === 'pdf') {
+    body.innerHTML = `<iframe src="${url}"></iframe>`;
   } else {
-    body.innerHTML = `<div class="preview-file-icon">${fileIcon(type)}<p>Preview tidak tersedia. Download untuk membuka.</p></div>`;
+    body.innerHTML = `<div class="preview-fallback">${fileIcon(item.type)}<p>Preview tidak tersedia. Download untuk membuka.</p></div>`;
   }
 }
 
-function closePreview() {
-  document.getElementById('previewModal').classList.add('hidden');
-  document.getElementById('previewBody').innerHTML = '';
-}
-
 // ===== DOWNLOAD =====
-async function downloadFile(name) {
-  const res = await apiCall('/download/' + encodeURIComponent(name));
+async function downloadFile(item) {
+  const res = await fetch(`/api/files/download/${encodeURIComponent(item.key)}`);
   if (!res.ok) return;
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = name;
+  a.download = item.name;
   a.click();
   URL.revokeObjectURL(url);
 }
 
 // ===== DELETE =====
-async function deleteFile(name) {
-  if (!confirm('Hapus "' + name + '"?')) return;
-  try {
-    const res = await apiCall('/delete/' + encodeURIComponent(name), { method: 'DELETE' });
-    if (!res.ok) throw new Error('Failed');
-    loadFiles();
-  } catch (e) {
-    alert('Gagal hapus file');
+async function deleteFiles(keys) {
+  if (!confirm(`Hapus ${keys.length} file?`)) return;
+  await fetch('/api/files/delete', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keys }),
+  });
+  keys.forEach(k => selectedItems.delete(k));
+  await loadFiles();
+  await loadStats();
+  toast('File dihapus');
+}
+
+// ===== RENAME =====
+async function renameFile(item) {
+  const newName = prompt('Nama baru:', item.name);
+  if (!newName || newName === item.name) return;
+  const res = await fetch('/api/files/rename', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ oldKey: item.key, newName }),
+  });
+  const data = await res.json();
+  if (data.error) { toast(data.error); return; }
+  await loadFiles();
+  toast('File diubah');
+}
+
+// ===== SHARE =====
+let shareItem = null;
+
+function openShareModal(item) {
+  shareItem = item;
+  $('shareResult').classList.add('hidden');
+  $('shareModal').classList.remove('hidden');
+}
+
+$('createShareBtn').addEventListener('click', async () => {
+  if (!shareItem) return;
+  const type = qs('input[name="shareType"]:checked').value;
+  const expires = $('shareExpires').value;
+  const res = await fetch('/api/files/share', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      key: shareItem.key,
+      expiresHours: parseInt(expires),
+      download: type === 'download',
+    }),
+  });
+  const data = await res.json();
+  if (data.url) {
+    const fullUrl = location.origin + data.url;
+    $('shareUrl').value = fullUrl;
+    $('shareResult').classList.remove('hidden');
+    $('copyShareBtn').onclick = () => {
+      $('shareUrl').select();
+      navigator.clipboard.writeText(fullUrl).then(() => toast('Link disalin'));
+    };
+  }
+});
+
+// ===== SETTINGS =====
+$('settingsBtn').addEventListener('click', () => {
+  $('settingsModal').classList.remove('hidden');
+  loadShareLinks();
+});
+
+$('changePwBtn').addEventListener('click', async () => {
+  const cur = $('currentPw').value;
+  const next = $('newPw').value;
+  const conf = $('confirmPw').value;
+  if (next !== conf) { $('pwMsg').textContent = 'Konfirmasi password tidak cocok'; return; }
+  if (next.length < 4) { $('pwMsg').textContent = 'Password min 4 karakter'; return; }
+
+  const res = await fetch('/api/auth/change-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ currentPassword: cur, newPassword: next }),
+  });
+  const data = await res.json();
+  if (data.error) {
+    $('pwMsg').textContent = data.error;
+    $('pwMsg').style.color = 'var(--danger)';
+  } else {
+    $('pwMsg').textContent = 'Password berhasil diganti';
+    $('pwMsg').style.color = 'var(--success)';
+    $('currentPw').value = '';
+    $('newPw').value = '';
+    $('confirmPw').value = '';
+    setTimeout(() => { $('pwMsg').textContent = ''; }, 3000);
+  }
+});
+
+async function loadShareLinks() {
+  const res = await fetch('/api/files/share/list');
+  const data = await res.json();
+  const list = $('shareLinksList');
+  list.innerHTML = '';
+  if (!data.shares || data.shares.length === 0) {
+    list.innerHTML = '<p style="color:var(--text-3);font-size:13px">Belum ada share link</p>';
+    return;
+  }
+  for (const s of data.shares) {
+    const div = document.createElement('div');
+    div.className = 'share-link-item';
+    const name = s.key.split('/').pop();
+    div.innerHTML = `<span class="share-link-item-name">${escapeHtml(name)}</span><span style="color:var(--text-3)">${s.count}x</span><button class="share-link-item-btn" data-token="${s.token}">Hapus</button>`;
+    div.querySelector('button').addEventListener('click', async () => {
+      await fetch(`/api/files/share/${s.token}`, { method: 'DELETE' });
+      loadShareLinks();
+      toast('Share link dihapus');
+    });
+    list.appendChild(div);
   }
 }
 
-// Expose for inline onclick
-window.downloadFile = downloadFile;
-window.deleteFile = deleteFile;
-window.closePreview = closePreview;
+// ===== SEARCH =====
+$('searchBtn').addEventListener('click', () => {
+  $('searchBar').classList.toggle('hidden');
+  if (!$('searchBar').classList.contains('hidden')) $('searchInput').focus();
+});
+
+$('searchInput').addEventListener('input', e => {
+  searchQuery = e.target.value.toLowerCase();
+  renderItems();
+});
+
+$('searchClose').addEventListener('click', () => {
+  $('searchBar').classList.add('hidden');
+  $('searchInput').value = '';
+  searchQuery = '';
+  renderItems();
+});
+
+// ===== SORT =====
+$('sortSelect').addEventListener('change', e => { sortMode = e.target.value; renderItems(); });
+
+// ===== VIEW TOGGLE =====
+$('gridViewBtn').addEventListener('click', () => {
+  currentView = 'grid';
+  $('gridViewBtn').classList.add('active');
+  $('listViewBtn').classList.remove('active');
+  renderItems();
+});
+
+$('listViewBtn').addEventListener('click', () => {
+  currentView = 'list';
+  $('listViewBtn').classList.add('active');
+  $('gridViewBtn').classList.remove('active');
+  renderItems();
+});
+
+// ===== BULK ACTIONS =====
+function updateBulkBar() {
+  const count = selectedItems.size;
+  $('bulkBar').classList.toggle('hidden', count === 0);
+  $('bulkCount').textContent = count + ' dipilih';
+}
+
+$('bulkCancel').addEventListener('click', () => {
+  selectedItems.clear();
+  updateBulkBar();
+  renderItems();
+});
+
+$('bulkDelete').addEventListener('click', () => {
+  if (selectedItems.size === 0) return;
+  deleteFiles([...selectedItems]);
+});
+
+$('bulkDownload').addEventListener('click', () => {
+  // Download each selected file
+  for (const key of selectedItems) {
+    const item = allItems.find(i => i.key === key);
+    if (item) downloadFile(item);
+  }
+});
+
+// ===== CONTEXT MENU =====
+function showContextMenu(e, item) {
+  e.preventDefault();
+  contextItem = item;
+  const menu = $('contextMenu');
+  menu.classList.remove('hidden');
+
+  const x = e.touches ? e.touches[0].clientX : e.clientX;
+  const y = e.touches ? e.touches[0].clientY : e.clientY;
+
+  menu.style.left = Math.min(x, window.innerWidth - 170) + 'px';
+  menu.style.top = Math.min(y, window.innerHeight - 220) + 'px';
+}
+
+$('contextMenu').querySelectorAll('.ctx-item').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (!contextItem) return;
+    const act = btn.dataset.action;
+    if (act === 'preview' && contextItem.type !== 'folder') previewFile(contextItem);
+    if (act === 'download') downloadFile(contextItem);
+    if (act === 'rename') renameFile(contextItem);
+    if (act === 'share') openShareModal(contextItem);
+    if (act === 'delete') deleteFiles([contextItem.key]);
+    $('contextMenu').classList.add('hidden');
+    contextItem = null;
+  });
+});
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('#contextMenu')) $('contextMenu').classList.add('hidden');
+});
+
+// ===== MODAL CLOSE =====
+document.querySelectorAll('[data-close]').forEach(el => {
+  el.addEventListener('click', closeAllModals);
+});
+
+function closeAllModals() {
+  qsa('.modal').forEach(m => m.classList.add('hidden'));
+  $('previewBody').innerHTML = '';
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeAllModals();
+});
+
+// ===== INIT =====
+checkAuth();

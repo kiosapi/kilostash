@@ -1,9 +1,19 @@
 {
   "name": "kilostash",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "wrangler pages dev .",
-    "deploy": "wrangler pages deploy . --project-name=kilostash"
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "build": "wrangler deploy --dry-run"
+  },
+  "dependencies": {
+    "hono": "^4.7.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250715.0",
+    "typescript": "^5.7.0",
+    "wrangler": "^4.111.0"
   }
 }
